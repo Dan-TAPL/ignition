@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ignition — TAPL</title>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Montserrat', sans-serif; overflow-x: hidden; }
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #3D2B79; border-radius: 3px; }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes confettiFall { 0% { transform: translateY(-10px) rotate(0deg); opacity: 1; } 100% { transform: translateY(120vh) rotate(720deg); opacity: 0; } }
+  @keyframes pulseDone { 0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(34,197,94,0.5); } 50% { transform: scale(1.06); box-shadow: 0 0 0 10px rgba(34,197,94,0); } }
+  .fade-up { animation: fadeUp 0.4s ease-out forwards; }
+  textarea, input { font-family: 'Montserrat', sans-serif; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<script>
+const C = {
+  purple: "#2D1B69", red: "#E8453C", green: "#22C55E",
+  amber: "#F59E0B", teal: "#0891B2", darkBg: "#1A1035",
+  darkCard: "#241850", darkBorder: "#3D2B79",
+  lightBg: "#F3F0FF", lightCard: "#FFFFFF", lightBorder: "#E2DDF0"
+};
+const darkTheme = {
+  bg: C.darkBg, card: C.darkCard, border: C.darkBorder,
+  text: "#FFFFFF", textMid: "#B8B0CC", textDim: "#8B80A5", textFaint: "#6B6080",
+  header: C.purple, inputBg: "#1E1245", inputBorder: "#3D2B79"
+};
+const lightTheme = {
+  bg: C.lightBg, card: C.lightCard, border: C.lightBorder,
+  text: "#1A1035", textMid: "#6B6080", textDim: "#8B80A5", textFaint: "#B8B0CC",
+  header: C.purple, inputBg: "#FFFFFF", inputBorder: "#E2DDF0"
+};
+const lbl = { fontFamily: "'Montserrat', sans-serif", fontWeight: 900, textTransform: "uppercase", letterSpacing: "1.5px" };
+function loadData(k, f) { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : f; } catch(e) { return f; } }
+function saveData(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e) {} }
+
+const PLACEHOLDERS = [
+  "e.g. Sit down at my desk",
+  "e.g. Open my laptop and log in",
+  "e.g. Close all distractions",
+  "e.g. Open the file I need to work on",
+  "e.g. Write the first line"
+];
+</script>
+
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+function App() {
+  const [dark, setDark] = useState(() => loadData("tapl-theme", true));
+  const T = dark ? darkTheme : lightTheme;
+  useEffect(() => { saveData("tapl-theme", dark); }, [dark]);
+
+  const [sessionCount, setSessionCount] = useState(() => loadData("ignition-count", 0));
+  const [step, setStep] = useState(0);
+  const [transitioning, setTransitioning] = useState(false);
+
+  const [answers, setAnswers] = useState({
+    work: "", why: "", challenge: "", negOutcome: "",
+    negImpact: "", posOutcome: "", posImpact: "", feeling: ""
+  });
+
+  const [userActions, setUserActions] = useState(["", "", "", "", ""]);
+  const [currentAction, setCurrentAction] = useState(0);
+  const [completedActions, setCompletedActions] = useState(new Set());
+  const [showConfetti, setShowConfetti] = useState(false);
+  const [bufferTimer, setBufferTimer] = useState(null);
+  const [actionTimer, setActionTimer] = useState(null);
+  const [actionTimerElapsed, setActionTimerElapsed] = useState(false);
+
+  const update = (f, v) => setAnswers(p => ({ ...p, [f]: v }));
+  const goNext = (n) => { setTransitioning(true); setTimeout(() => { setStep(n); setTransitioning(false); }, 300); };
+  const goBack = () => { if (step > 1) goNext(step - 1); else if (step === 1) goNext(0); };
+
+  // Buffer timer: 15s countdown before first action is shown
+  useEffect(() => {
+    if (step === 11) {
+      setBufferTimer(15);
+      setActionTimer(null);
+      setActionTimerElapsed(false);
+    }
+  }, [step]);
+
+  useEffect(() => {
+    if (bufferTimer === null) return;
+    if (bufferTimer <= 0) { setBufferTimer(null); setActionTimer(30); return; }
+    const t = setTimeout(() => setBufferTimer(b => b - 1), 1000);
+    return () => clearTimeout(t);
+  }, [bufferTimer]);
+
+  // Action timer: 30s countdown per action
+  useEffect(() => {
+    if (step !== 11 || bufferTimer !== null) return;
+    setActionTimer(30);
+    setActionTimerElapsed(false);
+  }, [currentAction]);
+
+  useEffect(() => {
+    if (actionTimer === null) return;
+    if (actionTimer <= 0) { setActionTimerElapsed(true); return; }
+    const t = setTimeout(() => setActionTimer(a => a - 1), 1000);
+    return () => clearTimeout(t);
+  }, [actionTimer]);
+
+  const completeAction = (i) => {
+    setActionTimer(null);
+    setActionTimerElapsed(false);
+    const next = new Set([...completedActions, i]);
+    setCompletedActions(next);
+    if (next.size >= 5) {
+      setTimeout(() => {
+        const nc = sessionCount + 1;
+        setSessionCount(nc);
+        saveData("ignition-count", nc);
+        const m = loadData("ignition-monthly", {});
+        const k = new Date().toISOString().slice(0, 7);
+        m[k] = (m[k] || 0) + 1;
+        saveData("ignition-monthly", m);
+        setShowConfetti(true);
+        setStep(12);
+        setTimeout(() => setShowConfetti(false), 4000);
+      }, 600);
+    } else {
+      for (let j = i + 1; j < 5; j++) { if (!next.has(j)) { setCurrentAction(j); return; } }
+      for (let j = 0; j < i; j++) { if (!next.has(j)) { setCurrentAction(j); return; } }
+    }
+  };
+
+  const reset = () => {
+    setStep(0);
+    setAnswers({ work: "", why: "", challenge: "", negOutcome: "", negImpact: "", posOutcome: "", posImpact: "", feeling: "" });
+    setUserActions(["", "", "", "", ""]);
+    setCurrentAction(0);
+    setCompletedActions(new Set());
+    setShowConfetti(false);
+    setBufferTimer(null);
+    setActionTimer(null);
+    setActionTimerElapsed(false);
+  };
+
+  const actionsReady = userActions.filter(a => a.trim()).length >= 5;
+  const promptStep = step >= 1 && step <= 8 ? step : null;
+
+  const inputStyle = {
+    width: "100%", padding: "16px", background: T.inputBg,
+    border: `1px solid ${T.inputBorder}`, borderRadius: 8,
+    color: T.text, fontSize: 14, outline: "none", resize: "none",
+    transition: "border 0.2s"
+  };
+
+  const header = (
+    <div style={{
+      background: T.header, padding: "0 20px", height: 60,
+      display: "flex", justifyContent: "space-between", alignItems: "center",
+      position: "sticky", top: 0, zIndex: 100
+    }}>
+      <div style={{ width: 80 }}><img src="data:image/png;base64,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" alt="TAPL" style={{ height: 40 }} /></div>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ ...lbl, fontSize: 18, color: "#FFFFFF", letterSpacing: "3px" }}>IGNITION</div>
+        <div style={{ ...lbl, fontSize: 9, color: C.red, letterSpacing: "2px", marginTop: 2 }}>THE ADHD PERFORMANCE LAB</div>
+      </div>
+      <button onClick={() => setDark(!dark)} style={{
+        background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)",
+        borderRadius: 6, padding: "6px 14px", cursor: "pointer",
+        ...lbl, fontSize: 10, color: "#FFFFFF"
+      }}>{dark ? "☀ LIGHT" : "● DARK"}</button>
+    </div>
+  );
+
+  const progressBar = promptStep && (
+    <div style={{ padding: "16px 20px 0", maxWidth: 550, margin: "0 auto" }}>
+      <div style={{ display: "flex", gap: 4 }}>
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} style={{
+            flex: 1, height: 4, borderRadius: 2,
+            background: i < promptStep ? C.teal : i === promptStep - 1 ? C.red : T.border,
+            transition: "background 0.4s"
+          }} />
+        ))}
+      </div>
+      <div style={{ textAlign: "right", marginTop: 4 }}>
+        <span style={{ ...lbl, fontSize: 8, color: T.textFaint }}>{promptStep} / 8</span>
+      </div>
+    </div>
+  );
+
+  const confetti = showConfetti && (
+    <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, pointerEvents: "none", zIndex: 999 }}>
+      {Array.from({ length: 50 }).map((_, i) => (
+        <div key={i} style={{
+          position: "absolute", left: `${Math.random() * 100}%`, top: -10,
+          width: 8, height: 8,
+          borderRadius: Math.random() > 0.5 ? "50%" : "2px",
+          background: [C.red, C.green, C.amber, C.teal, C.purple, "#FFFFFF"][Math.floor(Math.random() * 6)],
+          animation: `confettiFall ${2 + Math.random() * 3}s ease-in ${Math.random() * 0.5}s forwards`
+        }} />
+      ))}
+    </div>
+  );
+
+  const card = (sn, question, hint, field, placeholder, isLast) => (
+    <div key={sn} className={transitioning ? "" : "fade-up"} style={{
+      padding: "32px 20px", maxWidth: 550, margin: "0 auto",
+      opacity: transitioning ? 0 : 1, transition: "opacity 0.2s"
+    }}>
+      <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: "32px 24px" }}>
+        <div style={{ textAlign: "center", marginBottom: 24 }}>
+          <div style={{ fontSize: 17, fontWeight: 900, color: T.text, lineHeight: 1.4 }}>{question}</div>
+          {hint && <div style={{ fontSize: 11, color: T.textDim, marginTop: 8 }}>{hint}</div>}
+        </div>
+        <textarea
+          value={answers[field]}
+          onChange={e => update(field, e.target.value)}
+          placeholder={placeholder}
+          rows={2}
+          autoFocus
+          style={inputStyle}
+        />
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 20 }}>
+          <button onClick={goBack} style={{
+            background: "transparent", border: `1px solid ${T.border}`, borderRadius: 6,
+            padding: "10px 20px", cursor: "pointer", ...lbl, fontSize: 10, color: T.textMid
+          }}>← BACK</button>
+          <button
+            onClick={() => goNext(isLast ? 9 : sn + 1)}
+            disabled={!answers[field].trim()}
+            style={{
+              background: !answers[field].trim() ? T.border : C.red, color: "#FFFFFF",
+              border: "none", borderRadius: 6, padding: "10px 24px",
+              cursor: !answers[field].trim() ? "default" : "pointer",
+              ...lbl, fontSize: 10, opacity: !answers[field].trim() ? 0.5 : 1
+            }}
+          >NEXT →</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderStart = () => (
+    <div className="fade-up" style={{ textAlign: "center", padding: "60px 20px", maxWidth: 500, margin: "0 auto" }}>
+      <div style={{ fontSize: 48, marginBottom: 16 }}>⚡</div>
+      <div style={{ ...lbl, fontSize: 14, color: T.text, marginBottom: 8 }}>READY TO START?</div>
+      <div style={{ fontSize: 12, color: T.textDim, marginBottom: 32, lineHeight: 1.6 }}>
+        Eight questions. Five micro-actions.<br />Then you're in.
+      </div>
+      {sessionCount > 0 && (
+        <div style={{
+          background: T.card, border: `1px solid ${T.border}`, borderRadius: 8,
+          padding: "12px 16px", marginBottom: 24, display: "inline-block"
+        }}>
+          <span style={{ ...lbl, fontSize: 10, color: C.green }}>{sessionCount}</span>
+          <span style={{ fontSize: 11, color: T.textDim, marginLeft: 6 }}>
+            ignition{sessionCount !== 1 ? "s" : ""} completed
+          </span>
+        </div>
+      )}
+      <div>
+        <button onClick={() => goNext(1)} style={{
+          background: C.red, color: "#FFFFFF", border: "none", borderRadius: 8,
+          padding: "14px 32px", cursor: "pointer", ...lbl, fontSize: 12, letterSpacing: "2px"
+        }}>BEGIN</button>
+      </div>
+    </div>
+  );
+
+  const renderReview = () => {
+    const items = [
+      { label: "WORKING ON", value: answers.work },
+      { label: "WHY IT MATTERS", value: answers.why },
+      { label: "THE CHALLENGE", value: answers.challenge },
+      { label: "COST OF INACTION", value: answers.negOutcome },
+      { label: "LONGER TERM RISK", value: answers.negImpact },
+      { label: "POSITIVE OUTCOME", value: answers.posOutcome },
+      { label: "LONGER TERM GAIN", value: answers.posImpact },
+      { label: "HOW YOU'LL FEEL", value: answers.feeling }
+    ];
+    return (
+      <div className="fade-up" style={{ padding: "32px 20px", maxWidth: 550, margin: "0 auto" }}>
+        <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: "24px" }}>
+          <div style={{ textAlign: "center", marginBottom: 20 }}>
+            <div style={{ fontSize: 17, fontWeight: 900, color: T.text }}>Here's your picture.</div>
+            <div style={{ fontSize: 11, color: T.textDim, marginTop: 6 }}>Read it. Let it land.</div>
+          </div>
+          {items.map((item, i) => (
+            <div key={i} style={{
+              padding: "10px 12px",
+              borderBottom: i < items.length - 1 ? `1px solid ${T.border}33` : "none"
+            }}>
+              <div style={{ ...lbl, fontSize: 8, color: C.teal, marginBottom: 3 }}>{item.label}</div>
+              <div style={{ fontSize: 12, color: T.text, lineHeight: 1.5 }}>{item.value}</div>
+            </div>
+          ))}
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 24 }}>
+            <button onClick={() => goNext(8)} style={{
+              background: "transparent", border: `1px solid ${T.border}`, borderRadius: 6,
+              padding: "10px 20px", cursor: "pointer", ...lbl, fontSize: 10, color: T.textMid
+            }}>← BACK</button>
+            <button onClick={() => goNext(10)} style={{
+              background: C.red, color: "#FFFFFF", border: "none", borderRadius: 6,
+              padding: "10px 24px", cursor: "pointer", ...lbl, fontSize: 10
+            }}>DEFINE YOUR ACTIONS →</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderEnterActions = () => (
+    <div className="fade-up" style={{ padding: "32px 20px", maxWidth: 550, margin: "0 auto" }}>
+      <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: "32px 24px" }}>
+        <div style={{ textAlign: "center", marginBottom: 24 }}>
+          <div style={{ fontSize: 17, fontWeight: 900, color: T.text }}>Name five actions to get you moving.</div>
+          <div style={{ fontSize: 11, color: T.textDim, marginTop: 8 }}>
+            Physical. Specific. Completable in under 90 seconds each.
+          </div>
+        </div>
+        {userActions.map((action, i) => (
+          <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
+            <span style={{
+              ...lbl, fontSize: 11, color: action.trim() ? C.green : T.textFaint,
+              width: 24, textAlign: "right", flexShrink: 0
+            }}>{i + 1}</span>
+            <input
+              value={action}
+              onChange={e => {
+                const next = [...userActions];
+                next[i] = e.target.value;
+                setUserActions(next);
+              }}
+              placeholder={PLACEHOLDERS[i]}
+              autoFocus={i === 0}
+              style={{
+                ...inputStyle, padding: "12px 14px", fontSize: 13,
+                border: `1px solid ${action.trim() ? C.green + "44" : T.inputBorder}`
+              }}
+            />
+          </div>
+        ))}
+        <div style={{ textAlign: "right", marginTop: 4, marginBottom: 16 }}>
+          <span style={{ ...lbl, fontSize: 9, color: actionsReady ? C.green : T.textFaint }}>
+            {userActions.filter(a => a.trim()).length} / 5
+          </span>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between" }}>
+          <button onClick={() => goNext(9)} style={{
+            background: "transparent", border: `1px solid ${T.border}`, borderRadius: 6,
+            padding: "10px 20px", cursor: "pointer", ...lbl, fontSize: 10, color: T.textMid
+          }}>← BACK</button>
+          <button
+            onClick={() => { setCurrentAction(0); setCompletedActions(new Set()); goNext(11); }}
+            disabled={!actionsReady}
+            style={{
+              background: !actionsReady ? T.border : C.red, color: "#FFFFFF",
+              border: "none", borderRadius: 6, padding: "12px 28px",
+              cursor: !actionsReady ? "default" : "pointer",
+              ...lbl, fontSize: 11, letterSpacing: "2px",
+              opacity: !actionsReady ? 0.5 : 1
+            }}
+          >GO →</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderExecuteActions = () => {
+    // Buffer screen: 15s before first action
+    if (bufferTimer !== null) {
+      const pct = (bufferTimer / 15) * 100;
+      const circumference = 2 * Math.PI * 36;
+      return (
+        <div className="fade-up" style={{ padding: "60px 20px", maxWidth: 550, margin: "0 auto", textAlign: "center" }}>
+          <div style={{ ...lbl, fontSize: 10, color: T.textDim, marginBottom: 32, letterSpacing: "3px" }}>
+            GET READY
+          </div>
+          <div style={{ position: "relative", width: 100, height: 100, margin: "0 auto 32px" }}>
+            <svg width="100" height="100" style={{ transform: "rotate(-90deg)" }}>
+              <circle cx="50" cy="50" r="36" fill="none" stroke={T.border} strokeWidth="4" />
+              <circle cx="50" cy="50" r="36" fill="none" stroke={C.red} strokeWidth="4"
+                strokeDasharray={circumference}
+                strokeDashoffset={circumference * (1 - pct / 100)}
+                strokeLinecap="round"
+                style={{ transition: "stroke-dashoffset 0.9s linear" }}
+              />
+            </svg>
+            <div style={{
+              position: "absolute", top: "50%", left: "50%",
+              transform: "translate(-50%, -50%)",
+              ...lbl, fontSize: 28, color: T.text
+            }}>{bufferTimer}</div>
+          </div>
+          <div style={{ fontSize: 13, color: T.textMid, lineHeight: 1.6 }}>
+            Your first action is coming.<br />Take a breath.
+          </div>
+        </div>
+      );
+    }
+
+    return (
+    <div className="fade-up" style={{ padding: "32px 20px", maxWidth: 550, margin: "0 auto" }}>
+      <div style={{ display: "flex", justifyContent: "center", gap: 8, marginBottom: 20 }}>
+        {[0, 1, 2, 3, 4].map(i => (
+          <div key={i} style={{
+            width: 14, height: 14, borderRadius: "50%",
+            background: completedActions.has(i) ? C.green : i === currentAction ? C.red : T.border,
+            transition: "background 0.3s",
+            boxShadow: i === currentAction ? `0 0 8px ${C.red}66` : "none"
+          }} />
+        ))}
+      </div>
+      <div style={{
+        background: T.card, border: `1px solid ${T.border}`, borderRadius: 8,
+        padding: "8px 14px", marginBottom: 16, textAlign: "center"
+      }}>
+        <div style={{ fontSize: 10, color: T.textDim }}>Working on:</div>
+        <div style={{ fontSize: 12, color: T.text, fontWeight: 700, marginTop: 2 }}>{answers.work}</div>
+      </div>
+      {completedActions.size < 5 && (() => {
+        const timerPct = actionTimer !== null ? (actionTimer / 30) * 100 : 0;
+        const circumference = 2 * Math.PI * 16;
+        return (
+          <div style={{
+            background: T.card, border: `2px solid ${C.red}`,
+            borderRadius: 12, padding: "32px 24px", textAlign: "center", marginBottom: 16
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <div style={{ ...lbl, fontSize: 9, color: C.red }}>
+                ACTION {currentAction + 1} OF 5
+              </div>
+              {!actionTimerElapsed ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <svg width="40" height="40" style={{ transform: "rotate(-90deg)", flexShrink: 0 }}>
+                    <circle cx="20" cy="20" r="16" fill="none" stroke={T.border} strokeWidth="3" />
+                    <circle cx="20" cy="20" r="16" fill="none"
+                      stroke={actionTimer !== null && actionTimer <= 10 ? C.amber : C.teal}
+                      strokeWidth="3"
+                      strokeDasharray={circumference}
+                      strokeDashoffset={circumference * (1 - timerPct / 100)}
+                      strokeLinecap="round"
+                      style={{ transition: "stroke-dashoffset 0.9s linear" }}
+                    />
+                  </svg>
+                  <span style={{
+                    ...lbl, fontSize: 14,
+                    color: actionTimer !== null && actionTimer <= 10 ? C.amber : C.teal
+                  }}>{actionTimer ?? 30}</span>
+                </div>
+              ) : (
+                <span style={{ ...lbl, fontSize: 8, color: C.amber }}>TIME'S UP</span>
+              )}
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: T.text, marginBottom: 20, lineHeight: 1.5 }}>
+              {userActions[currentAction]}
+            </div>
+            {actionTimerElapsed && (
+              <div style={{
+                fontSize: 12, color: C.amber, marginBottom: 16, fontWeight: 700
+              }}>
+                Time's up! Hit done when you're ready.
+              </div>
+            )}
+            <button onClick={() => completeAction(currentAction)} style={{
+              background: C.green, color: "#FFFFFF", border: "none", borderRadius: 8,
+              padding: "14px 40px", cursor: "pointer",
+              ...lbl, fontSize: 13, letterSpacing: "2px",
+              animation: actionTimerElapsed ? "pulseDone 1s ease-in-out infinite" : "none"
+            }}>DONE ✓</button>
+          </div>
+        );
+      })()}
+      {completedActions.size > 0 && (
+        <div style={{ marginTop: 8 }}>
+          {[0, 1, 2, 3, 4].filter(i => completedActions.has(i)).map(i => (
+            <div key={i} style={{
+              display: "flex", alignItems: "center", gap: 8, padding: "5px 0", opacity: 0.4
+            }}>
+              <span style={{ ...lbl, fontSize: 9, color: C.green }}>✓</span>
+              <span style={{ fontSize: 11, color: T.textDim, textDecoration: "line-through" }}>
+                {userActions[i]}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+    );
+  };
+
+  const renderDone = () => (
+    <div className="fade-up" style={{ textAlign: "center", padding: "80px 20px", maxWidth: 500, margin: "0 auto" }}>
+      <div style={{ fontSize: 14, color: T.text, marginBottom: 32, lineHeight: 1.8 }}>
+        You're in. Go.
+      </div>
+      <div style={{
+        background: T.card, border: `1px solid ${T.border}`, borderRadius: 8,
+        padding: "16px 20px", marginBottom: 32, display: "inline-block"
+      }}>
+        <span style={{ ...lbl, fontSize: 10, color: C.green }}>{sessionCount}</span>
+        <span style={{ fontSize: 11, color: T.textDim, marginLeft: 6 }}>
+          ignition{sessionCount !== 1 ? "s" : ""} completed
+        </span>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "center" }}>
+        <button onClick={reset} style={{
+          background: C.red, color: "#FFFFFF", border: "none", borderRadius: 8,
+          padding: "14px 32px", cursor: "pointer", ...lbl, fontSize: 12, letterSpacing: "2px"
+        }}>NEW IGNITION</button>
+        <a href="https://dan-tapl.github.io/focus-engine/" style={{
+          background: "transparent", border: `1px solid ${C.teal}`, borderRadius: 8,
+          padding: "12px 28px", cursor: "pointer", textDecoration: "none",
+          ...lbl, fontSize: 11, color: C.teal, letterSpacing: "1.5px", display: "inline-block"
+        }}>LAUNCH FOCUS ENGINE →</a>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ background: T.bg, minHeight: "100vh", transition: "background 0.3s" }}>
+      {confetti}
+      {header}
+      <div style={{ borderTop: `3px solid ${C.red}` }}>
+        {progressBar}
+        {step === 0 && renderStart()}
+        {step === 1 && card(1, "What are you about to start working on?", "Be specific. One sentence.", "work", "e.g. Finishing the Q2 board presentation")}
+        {step === 2 && card(2, "Why is this task important?", null, "why", "e.g. It determines whether we get the funding for next quarter")}
+        {step === 3 && card(3, "What are you finding challenging about getting started?", null, "challenge", "e.g. I don't know where to begin and the scope feels overwhelming")}
+        {step === 4 && card(4, "What happens if you don't do the task?", null, "negOutcome", "e.g. The deadline passes and I let the team down")}
+        {step === 5 && card(5, "What's the longer term impact of that?", null, "negImpact", "e.g. I lose trust with leadership and it affects my progression")}
+        {step === 6 && card(6, "What positives come from completing this task?", null, "posOutcome", "e.g. The presentation lands and we secure the budget")}
+        {step === 7 && card(7, "What's the longer term impact of that positive outcome?", null, "posImpact", "e.g. I build a track record of delivery and earn more autonomy")}
+        {step === 8 && card(8, "How will you feel once this is done?", null, "feeling", "e.g. Relieved, proud, and free to focus on what's next", true)}
+        {step === 9 && renderReview()}
+        {step === 10 && renderEnterActions()}
+        {step === 11 && renderExecuteActions()}
+        {step === 12 && renderDone()}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
